@@ -342,6 +342,24 @@ namespace Robust.Shared
             CVarDef.Create("net.log_late_msg", true);
 
         /// <summary>
+        /// How many ticks ahead of the server's current tick an entity network message from a client may be stamped.
+        /// </summary>
+        /// <remarks>
+        /// Clients are disconnected if they exceed this limit.
+        /// </remarks>
+        public static readonly CVarDef<int> NetEntityMsgMaxTickLead =
+            CVarDef.Create("net.entity_msg_max_tick_lead", 100, CVar.SERVERONLY);
+
+        /// <summary>
+        /// Maximum amount of entity network messages from a single client that may be queued at once.
+        /// </summary>
+        /// <remarks>
+        /// Clients are disconnected if they exceed this limit.
+        /// </remarks>
+        public static readonly CVarDef<int> NetEntityMsgMaxQueuedPerClient =
+            CVarDef.Create("net.entity_msg_max_queued_per_client", 512, CVar.SERVERONLY);
+
+        /// <summary>
         /// Ticks per second on the server.
         /// This influences both how frequently game code processes, and how frequently updates are sent to clients.
         /// </summary>

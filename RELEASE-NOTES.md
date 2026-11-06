@@ -43,7 +43,7 @@ END TEMPLATE-->
 
 ### Bugfixes
 
-*None yet*
+* Entity network messages from clients can no longer be queued forever on the server. Messages stamped too far in the future or exceeding a per-client queue limit now disconnect the client, and queued messages are dropped when a client disconnects. See the new `net.entity_msg_max_tick_lead` and `net.entity_msg_max_queued_per_client` CVars.
 
 ### Other
 

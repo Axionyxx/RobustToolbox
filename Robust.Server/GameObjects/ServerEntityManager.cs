@@ -150,7 +150,12 @@ namespace Robust.Server.GameObjects
         private readonly Dictionary<ICommonSession, uint> _lastProcessedSequencesCmd =
             new();
 
+        // Amount of messages currently in _queue per client, so one client can't make us hold on to unlimited messages.
+        private readonly Dictionary<INetChannel, int> _queuedMsgCounts = new();
+
         private bool _logLateMsgs;
+        private int _maxTickLead;
+        private int _maxQueuedPerClient;
 
         /// <inheritdoc />
         public void SetupNetworking()
@@ -160,6 +165,8 @@ namespace Robust.Server.GameObjects
             _playerManager.PlayerStatusChanged += OnPlayerStatusChanged;
 
             _configurationManager.OnValueChanged(CVars.NetLogLateMsg, b => _logLateMsgs = b, true);
+            _configurationManager.OnValueChanged(CVars.NetEntityMsgMaxTickLead, i => _maxTickLead = i, true);
+            _configurationManager.OnValueChanged(CVars.NetEntityMsgMaxQueuedPerClient, i => _maxQueuedPerClient = i, true);
         }
 
         /// <inheritdoc />
@@ -171,7 +178,9 @@ namespace Robust.Server.GameObjects
             {
                 while (_queue.Count != 0 && _queue.Peek().msg.SourceTick <= _gameTiming.CurTick)
                 {
-                    DispatchEntityNetworkMessage(_queue.Take().msg);
+                    var msg = _queue.Take().msg;
+                    DecrementQueuedCount(msg.MsgChannel);
+                    DispatchEntityNetworkMessage(msg);
                 }
             }
 
@@ -238,8 +247,63 @@ namespace Robust.Server.GameObjects
                 }
             }
 
+            var channel = message.MsgChannel;
+            if (!channel.IsConnected)
+                return;
+
+            // Messages are held until the server reaches their tick, and the tick comes from the client.
+            // Without a limit a far future tick would keep the message in the queue forever.
+            if (message.SourceTick.Value > (long) _gameTiming.CurTick.Value + _maxTickLead)
+            {
+                _netEntSawmill.Warning(
+                    $"Got MsgEntity too far in the future from {channel}, msgT: {message.SourceTick}, cT: {_gameTiming.CurTick}");
+                channel.Disconnect("Sent entity message too far in the future");
+                return;
+            }
+
+            var count = _queuedMsgCounts.GetValueOrDefault(channel);
+            if (count >= _maxQueuedPerClient)
+            {
+                _netEntSawmill.Warning($"Too many queued MsgEntity from {channel}, disconnecting");
+                channel.Disconnect("Too many queued entity messages");
+                return;
+            }
+
+            _queuedMsgCounts[channel] = count + 1;
+
             // Tag each message with an increasing arrival number, so ties keep the order they came in
             _queue.Add((++_incomingMsgSequence, message));
+        }
+
+        private void DecrementQueuedCount(INetChannel channel)
+        {
+            if (!_queuedMsgCounts.TryGetValue(channel, out var count))
+                return;
+
+            if (count <= 1)
+                _queuedMsgCounts.Remove(channel);
+            else
+                _queuedMsgCounts[channel] = count - 1;
+        }
+
+        private void PurgeQueuedMessages(INetChannel channel)
+        {
+            if (!_queuedMsgCounts.Remove(channel))
+                return;
+
+            // PriorityQueue has no efficient removal, so rebuild it without the messages of this client.
+            var keep = new List<(ulong arrival, MsgEntity msg)>(_queue.Count);
+            foreach (var entry in _queue)
+            {
+                if (entry.msg.MsgChannel != channel)
+                    keep.Add(entry);
+            }
+
+            _queue.Clear();
+            foreach (var entry in keep)
+            {
+                _queue.Add(entry);
+            }
         }
 
         private void DispatchEntityNetworkMessage(MsgEntity message)
@@ -294,6 +358,7 @@ namespace Robust.Server.GameObjects
 
                 case SessionStatus.Disconnected:
                     _lastProcessedSequencesCmd.Remove(args.Session);
+                    PurgeQueuedMessages(args.Session.Channel);
                     break;
             }
         }
