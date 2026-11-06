@@ -256,7 +256,7 @@ namespace Robust.Server.GameObjects
             if (message.SourceTick.Value > (long) _gameTiming.CurTick.Value + _maxTickLead)
             {
                 _netEntSawmill.Warning(
-                    $"Got MsgEntity too far in the future from {channel}, msgT: {message.SourceTick}, cT: {_gameTiming.CurTick}");
+                    $"Got MsgEntity too far in the future! Diff: {message.SourceTick.Value - (long) _gameTiming.CurTick.Value}, max: {_maxTickLead}, msgT: {message.SourceTick}, cT: {_gameTiming.CurTick}, player: {channel.UserName}, endpoint: {channel.RemoteEndPoint}, msg: {message.SystemMessage}");
                 channel.Disconnect("Sent entity message too far in the future");
                 return;
             }
@@ -264,7 +264,8 @@ namespace Robust.Server.GameObjects
             var count = _queuedMsgCounts.GetValueOrDefault(channel);
             if (count >= _maxQueuedPerClient)
             {
-                _netEntSawmill.Warning($"Too many queued MsgEntity from {channel}, disconnecting");
+                _netEntSawmill.Warning(
+                    $"Too many queued MsgEntity! Queued: {count}, max: {_maxQueuedPerClient}, player: {channel.UserName}, endpoint: {channel.RemoteEndPoint}, msg: {message.SystemMessage}");
                 channel.Disconnect("Too many queued entity messages");
                 return;
             }
